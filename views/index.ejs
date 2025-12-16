@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图片筛选工具</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .image-container {
+            background: white;
+            border-radius: 8px;
+            padding: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            min-height: 600px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        .image-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: flex-start;
+        }
+        .image-item {
+            width: 200px;
+            height: 200px;
+            object-fit: cover;
+            cursor: pointer;
+            border: 3px solid transparent;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+        .image-item:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 5px rgba(0,0,0,0.2);
+        }
+        .image-item.selected {
+            border-color: #198754; /* Bootstrap Success Color */
+        }
+        .image-item.active-file {
+            border-color: #0d6efd; /* Bootstrap Primary Color */
+        }
+        .nav-btn {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            background-color: rgba(0,0,0,0.5);
+            color: white;
+            border: none;
+            padding: 15px;
+            cursor: pointer;
+            font-size: 24px;
+            z-index: 10;
+            text-decoration: none;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.3s;
+        }
+        .nav-btn:hover {
+            background-color: rgba(0,0,0,0.8);
+            color: white;
+        }
+        .nav-prev { left: 10px; }
+        .nav-next { right: 10px; }
+        
+        .control-panel {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            height: 100%;
+        }
+        .big-btn {
+            width: 100%;
+            padding: 15px;
+            font-size: 1.2rem;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="#">图片筛选工具</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+            <ul class="navbar-nav me-auto">
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" id="projectDropdown" role="button" data-bs-toggle="dropdown">
+                        当前项目: <strong><%= project ? project.name : '未选择' %></strong>
+                    </a>
+                    <ul class="dropdown-menu">
+                        <% projects.forEach(p => { %>
+                            <li>
+                                <form action="/switchProject" method="POST" style="display:inline;">
+                                    <input type="hidden" name="projectId" value="<%= p.id %>">
+                                    <button type="submit" class="dropdown-item <%= project && project.id === p.id ? 'active' : '' %>">
+                                        <%= p.name %>
+                                    </button>
+                                </form>
+                            </li>
+                        <% }); %>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#projectModal">管理项目...</a></li>
+                    </ul>
+                </li>
+            </ul>
+            
+            <% if (project) { %>
+                <div class="dropdown me-3">
+                    <button class="btn btn-outline-light dropdown-toggle" type="button" id="roundDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                        第 <%= project.currentRound %> 轮
+                    </button>
+                    <ul class="dropdown-menu" aria-labelledby="roundDropdown">
+                        <% for(let i = 1; i <= maxRound; i++) { %>
+                            <li>
+                                <form action="/switchRound" method="POST" style="display:inline; width: 100%;">
+                                    <input type="hidden" name="round" value="<%= i %>">
+                                    <button type="submit" class="dropdown-item <%= project.currentRound === i ? 'active' : '' %>">
+                                        第 <%= i %> 轮
+                                    </button>
+                                </form>
+                            </li>
+                        <% } %>
+                    </ul>
+                </div>
+            <% } %>
+
+            <button class="btn btn-success btn-sm" id="finishBtn">本轮完成 (Next)</button>
+            <button class="btn btn-warning btn-sm ms-2" id="exportToPhotographerBtn">导出全部给摄影师</button>
+        </div>
+    </div>
+</nav>
+
+<div class="container-fluid">
+    <% if (!project) { %>
+        <div class="alert alert-warning text-center">请先创建或选择一个项目。</div>
+    <% } else { %>
+        <div class="row">
+            <!-- Left Column: Image Display -->
+            <div class="col-md-7">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div class="btn-group">
+                        <a href="/?mode=single&file=<%= fileName %>" class="btn btn-outline-secondary <%= currentMode === 'single' ? 'active' : '' %>">单张模式</a>
+                        <a href="/?mode=list" class="btn btn-outline-secondary <%= currentMode === 'list' ? 'active' : '' %>">列表模式</a>
+                    </div>
+                    <span class="text-muted">当前目录: <%= project.filePath %></span>
+                </div>
+
+                <div class="image-container">
+                    <% if (currentMode === 'single') { %>
+                        <% if (fileName) { %>
+                            <%
+                              const currentIndex = imageList.indexOf(fileName);
+                              const prevImage = currentIndex > 0 ? imageList[currentIndex - 1] : null;
+                              const nextImage = currentIndex < imageList.length - 1 ? imageList[currentIndex + 1] : null;
+                            %>
+                            
+                            <% if (prevImage) { %>
+                                <a href="/?mode=single&file=<%= prevImage %>" class="nav-btn nav-prev" title="上一张">&lt;</a>
+                            <% } %>
+                            
+                            <img src="/image?name=<%= fileName %>" alt="<%= fileName %>" style="max-width: 100%; max-height: 85vh;">
+                            
+                            <% if (nextImage) { %>
+                                <a href="/?mode=single&file=<%= nextImage %>" class="nav-btn nav-next" title="下一张">&gt;</a>
+                            <% } %>
+                        <% } else { %>
+                            <div class="text-center text-muted">
+                                <h4>暂无图片</h4>
+                                <p>请检查路径设置或目录下无图片。</p>
+                            </div>
+                        <% } %>
+                    <% } else { %>
+                        <div class="image-list">
+                            <% if (imageList && imageList.length > 0) { %>
+                                <% imageList.forEach(function(img) { %>
+                                    <a href="/?mode=single&file=<%= img %>">
+                                        <img src="/image?name=<%= img %>" class="image-item <%= currentRoundSelections.includes(img) ? 'selected' : '' %> <%= fileName === img ? 'active-file' : '' %>" title="<%= img %>">
+                                    </a>
+                                <% }); %>
+                            <% } else { %>
+                                <p class="text-muted">暂无图片。</p>
+                            <% } %>
+                        </div>
+                    <% } %>
+                </div>
+            </div>
+
+            <!-- Right Column: Controls -->
+            <div class="col-md-5">
+                <div class="control-panel">
+                    <h4 class="mb-3">当前文件</h4>
+                    <p class="lead text-break"><%= fileName || '未选择' %></p>
+                    
+                    <% if (fileName) { %>
+                        <button id="selectBtn" class="btn big-btn <%= currentRoundSelections.includes(fileName) ? 'btn-success' : 'btn-outline-primary' %>">
+                            <%= currentRoundSelections.includes(fileName) ? '已选择 (Selected)' : '选择 (Select)' %>
+                        </button>
+                    <% } %>
+
+                    <hr>
+                    
+                    <h5 class="mb-3">本轮已选 (<%= currentRoundSelections.length %>)</h5>
+                    <div style="max-height: 200px; overflow-y: auto; background: #f1f1f1; padding: 10px; border-radius: 4px; margin-bottom: 15px;">
+                        <% if (currentRoundSelections.length > 0) { %>
+                            <ul class="list-unstyled mb-0" id="selectionList">
+                                <% currentRoundSelections.forEach(function(item) { %>
+                                    <li><%= item %></li>
+                                <% }); %>
+                            </ul>
+                        <% } else { %>
+                            <span class="text-muted">暂无选择</span>
+                        <% } %>
+                    </div>
+                    
+                    <button class="btn btn-info text-white w-100 mb-3" id="exportBtn">
+                        <i class="bi bi-clipboard"></i> 导出文件名到剪贴板
+                    </button>
+
+                    <hr>
+
+                    <form method="POST" action="/updateSettings">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h5 class="mb-0">
+                                <button class="btn btn-link text-decoration-none p-0 text-dark" type="button" data-bs-toggle="collapse" data-bs-target="#settingsCollapse" aria-expanded="false" aria-controls="settingsCollapse">
+                                    <i class="bi bi-gear"></i> 配置设置 (点击展开)
+                                </button>
+                            </h5>
+                        </div>
+                        <div class="collapse" id="settingsCollapse">
+                            <div class="card card-body bg-light">
+                                <div class="mb-3">
+                                    <label for="xSelected" class="form-label">X选项内容：</label>
+                                    <input type="text" class="form-control" id="xSelected" name="xSelected" value="<%= project.xSelected %>">
+                                </div>
+                                <div class="mb-3">
+                                    <label for="filePath" class="form-label">文件路径：</label>
+                                    <input type="text" class="form-control" id="filePath" name="filePath" value="<%= project.filePath %>">
+                                </div>
+                                <button type="submit" class="btn btn-secondary btn-sm">更新设置</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    <% } %>
+</div>
+
+<!-- Project Management Modal -->
+<div class="modal fade" id="projectModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">项目管理</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <h6>新建项目</h6>
+                <form action="/createProject" method="POST" class="mb-4">
+                    <div class="mb-2">
+                        <input type="text" name="name" class="form-control" placeholder="项目名称" required>
+                    </div>
+                    <div class="mb-2">
+                        <input type="text" name="filePath" class="form-control" placeholder="图片路径">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm">创建</button>
+                </form>
+
+                <h6>现有项目列表</h6>
+                <ul class="list-group">
+                    <% projects.forEach(p => { %>
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            <span>
+                                <%= p.name %> 
+                                <% if (project && project.id === p.id) { %><span class="badge bg-success">当前</span><% } %>
+                            </span>
+                            <div>
+                                <% if (projects.length > 1) { %>
+                                    <form action="/deleteProject" method="POST" style="display:inline;" onsubmit="return confirm('确定删除该项目吗？');">
+                                        <input type="hidden" name="projectId" value="<%= p.id %>">
+                                        <button type="submit" class="btn btn-danger btn-sm">删除</button>
+                                    </form>
+                                <% } %>
+                            </div>
+                        </li>
+                    <% }); %>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+    const fileName = "<%= fileName %>";
+    const selections = <%- JSON.stringify(currentRoundSelections || []) %>;
+    const allImages = <%- JSON.stringify(imageList || []) %>;
+
+    // Select Button Logic
+    const selectBtn = document.getElementById('selectBtn');
+    if (selectBtn) {
+        selectBtn.addEventListener('click', () => {
+            fetch('/toggleSelection', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fileName: fileName })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    // Reloading is easier to keep state consistent.
+                    window.location.reload(); 
+                }
+            });
+        });
+    }
+
+    // Finish Button Logic
+    const finishBtn = document.getElementById('finishBtn');
+    if (finishBtn) {
+        finishBtn.addEventListener('click', () => {
+            fetch('/finishRound', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    if (confirm('本轮选择已保存。是否进入下一轮选择？')) {
+                        proceedToNextRound(false);
+                    }
+                } else {
+                    alert('保存失败：' + (data.error || '未知错误'));
+                }
+            });
+        });
+    }
+
+    function proceedToNextRound(force) {
+        fetch('/nextRound', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ force: force })
+        })
+        .then(res => res.json())
+        .then(nextData => {
+            if (nextData.success) {
+                window.location.reload();
+            } else if (nextData.requireConfirmation) {
+                if (confirm(nextData.message || '下一轮已有选择记录。是否覆盖？(注意：这将清除下一轮已有的选择)')) {
+                    proceedToNextRound(true);
+                }
+            } else {
+                alert('无法进入下一轮：' + (nextData.message || '未知错误'));
+            }
+        });
+    }
+
+    // Export Button Logic
+    const exportBtn = document.getElementById('exportBtn');
+    if (exportBtn) {
+        exportBtn.addEventListener('click', () => {
+            if (selections.length === 0) {
+                alert('当前没有选中的文件。');
+                return;
+            }
+            const textToCopy = selections.join('\n');
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                // Change button text temporarily
+                const originalText = exportBtn.innerHTML;
+                exportBtn.innerText = '已导出！';
+                exportBtn.classList.remove('btn-info');
+                exportBtn.classList.add('btn-success');
+                setTimeout(() => {
+                    exportBtn.innerHTML = originalText;
+                    exportBtn.classList.remove('btn-success');
+                    exportBtn.classList.add('btn-info');
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy: ', err);
+                alert('导出失败，请重试');
+            });
+        });
+    }
+
+    // Export to Photographer Button Logic
+    const exportToPhotographerBtn = document.getElementById('exportToPhotographerBtn');
+    if (exportToPhotographerBtn) {
+        exportToPhotographerBtn.addEventListener('click', () => {
+            let listToExport = selections;
+            if (listToExport.length === 0) {
+                listToExport = allImages;
+            }
+            
+            if (listToExport.length === 0) {
+                alert('当前没有任何图片文件。');
+                return;
+            }
+
+            const textToCopy = listToExport.join('\n');
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                const originalText = exportToPhotographerBtn.innerText;
+                exportToPhotographerBtn.innerText = '已复制！';
+                setTimeout(() => {
+                    exportToPhotographerBtn.innerText = originalText;
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy: ', err);
+                alert('复制失败，请重试');
+            });
+        });
+    }
+</script>
+
+</body>
+</html>
